@@ -1,0 +1,293 @@
+import { useState, useEffect } from 'react'
+import {
+  Table, Card, Button, Modal, Form, Input, Select, Typography, Tag,
+  Row, Col, Space, message, Tooltip, Badge, Descriptions, Popconfirm,
+} from 'antd'
+import {
+  PlusOutlined, CopyOutlined, DeleteOutlined,
+  ReloadOutlined, VideoCameraOutlined,
+} from '@ant-design/icons'
+import { cameraService, vehicleService } from '@/services'
+import { CAMERA_TYPES, CAMERA_STATUSES } from '@/constants'
+import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
+
+dayjs.extend(relativeTime)
+
+const { Title, Text, Paragraph } = Typography
+
+const DEMO_WEBCAM_KEY = 'demo-webcam-api-key-for-testing-1234567890abcdef0123456789abcdef'
+
+function ConnectionInfo({ camera }) {
+  const localUrl = 'http://localhost:8000/api/webhook/violation'
+  const prodUrl = `${window.location.origin}/api/webhook/violation`
+
+  const curlSnippet = `curl -X POST ${localUrl} \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${camera.api_key}" \\
+  -d '{
+    "driver_id": 1,
+    "vehicle_id": 1,
+    "event_type": "overspeed",
+    "severity": "high",
+    "timestamp": "${new Date().toISOString().slice(0, 19)}",
+    "camera_id": ${camera.id},
+    "speed": 140
+  }'`
+
+  const pythonSnippet = `import requests
+
+response = requests.post(
+    "${localUrl}",
+    json={
+        "driver_id": 1,
+        "vehicle_id": 1,
+        "event_type": "overspeed",
+        "severity": "high",
+        "timestamp": "${new Date().toISOString().slice(0, 19)}",
+        "camera_id": ${camera.id},
+        "speed": 140,
+    },
+    headers={
+        "X-API-Key": "${camera.api_key}",
+        "Content-Type": "application/json",
+    },
+)
+print(response.json())`
+
+  const copyToClipboard = (text, label) => {
+    navigator.clipboard.writeText(text)
+    message.success(`${label} copied to clipboard`)
+  }
+
+  return (
+    <div style={{ padding: '8px 0' }}>
+      <Descriptions column={1} size="small" bordered>
+        <Descriptions.Item label="Camera ID">{camera.id}</Descriptions.Item>
+        <Descriptions.Item label="API Key">
+          <Space>
+            <Text code copyable style={{ fontSize: 12 }}>{camera.api_key}</Text>
+          </Space>
+        </Descriptions.Item>
+        <Descriptions.Item label="Webhook URL (Localhost)">
+          <Text code copyable>{localUrl}</Text>
+        </Descriptions.Item>
+        <Descriptions.Item label="Webhook URL (Production)">
+          <Text code copyable>{prodUrl}</Text>
+        </Descriptions.Item>
+      </Descriptions>
+
+      <Row gutter={16} style={{ marginTop: 12 }}>
+        <Col span={12}>
+          <Card size="small" title="cURL Example" extra={
+            <Button size="small" icon={<CopyOutlined />} onClick={() => copyToClipboard(curlSnippet, 'cURL command')}>Copy</Button>
+          }>
+            <pre style={{ fontSize: 11, margin: 0, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}>
+              {curlSnippet}
+            </pre>
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card size="small" title="Python Example" extra={
+            <Button size="small" icon={<CopyOutlined />} onClick={() => copyToClipboard(pythonSnippet, 'Python code')}>Copy</Button>
+          }>
+            <pre style={{ fontSize: 11, margin: 0, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}>
+              {pythonSnippet}
+            </pre>
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  )
+}
+
+export default function CameraList() {
+  const [cameras, setCameras] = useState([])
+  const [vehicles, setVehicles] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [form] = Form.useForm()
+
+  const fetchCameras = () => {
+    setLoading(true)
+    cameraService.getList()
+      .then((res) => setCameras(res.data))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    fetchCameras()
+    vehicleService.getList().then((res) => setVehicles(res.data)).catch(console.error)
+  }, [])
+
+  const handleCreate = () => {
+    form.validateFields().then((values) => {
+      cameraService.create(values)
+        .then((res) => {
+          message.success('Camera registered successfully')
+          setModalOpen(false)
+          form.resetFields()
+          fetchCameras()
+          Modal.info({
+            title: 'Camera API Key',
+            content: (
+              <div>
+                <Paragraph>Save this API key. You will need it to connect this camera.</Paragraph>
+                <Text code copyable>{res.data.api_key}</Text>
+              </div>
+            ),
+            width: 520,
+          })
+        })
+        .catch(() => message.error('Failed to register camera'))
+    })
+  }
+
+  const handleDelete = (id) => {
+    cameraService.delete(id)
+      .then(() => { message.success('Camera deleted'); fetchCameras() })
+      .catch(() => message.error('Failed to delete camera'))
+  }
+
+  const columns = [
+    {
+      title: 'Name',
+      dataIndex: 'name',
+      key: 'name',
+      render: (v, record) => (
+        <Space>
+          <VideoCameraOutlined />
+          <Text strong>{v}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Type',
+      dataIndex: 'camera_type',
+      key: 'type',
+      width: 130,
+      render: (v) => {
+        const ct = CAMERA_TYPES[v]
+        return ct ? <Tag color={ct.color}>{ct.label}</Tag> : v
+      },
+    },
+    {
+      title: 'Vehicle',
+      dataIndex: 'vehicle_plate',
+      key: 'vehicle',
+      width: 140,
+      render: (v) => v || <Text type="secondary">None</Text>,
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (v, record) => {
+        const cs = CAMERA_STATUSES[v] || CAMERA_STATUSES.offline
+        const isStale = record.last_heartbeat && dayjs().diff(dayjs(record.last_heartbeat), 'minute') > 5
+        const effectiveStatus = v === 'online' && isStale ? 'offline' : v
+        const effectiveCs = CAMERA_STATUSES[effectiveStatus] || CAMERA_STATUSES.offline
+        return <Badge status={effectiveCs.color === 'green' ? 'success' : effectiveCs.color === 'red' ? 'error' : 'default'} text={effectiveCs.label} />
+      },
+    },
+    {
+      title: 'Last Heartbeat',
+      dataIndex: 'last_heartbeat',
+      key: 'heartbeat',
+      width: 150,
+      render: (v) => v ? dayjs(v).fromNow() : <Text type="secondary">Never</Text>,
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 100,
+      render: (_, record) => (
+        <Space>
+          <Tooltip title="Copy API Key">
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={(e) => {
+                e.stopPropagation()
+                navigator.clipboard.writeText(record.api_key)
+                message.success('API key copied')
+              }}
+            />
+          </Tooltip>
+          <Popconfirm title="Delete this camera?" onConfirm={() => handleDelete(record.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <div>
+      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
+        <Col>
+          <Title level={4} style={{ margin: 0 }}>Camera Management</Title>
+        </Col>
+        <Col>
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={fetchCameras}>Refresh</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+              Register Camera
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+
+      <Card>
+        <Table
+          dataSource={cameras}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          expandable={{
+            expandedRowRender: (record) => <ConnectionInfo camera={record} />,
+          }}
+          size="middle"
+        />
+      </Card>
+
+      <Modal
+        title="Register New Camera"
+        open={modalOpen}
+        onOk={handleCreate}
+        onCancel={() => { setModalOpen(false); form.resetFields() }}
+        okText="Register"
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item name="name" label="Camera Name" rules={[{ required: true }]}>
+            <Input placeholder="e.g. DXB-A Front Dashcam" />
+          </Form.Item>
+          <Form.Item name="camera_type" label="Camera Type" rules={[{ required: true }]}>
+            <Select
+              placeholder="Select type"
+              options={Object.entries(CAMERA_TYPES).map(([k, v]) => ({ label: v.label, value: k }))}
+            />
+          </Form.Item>
+          <Form.Item name="location" label="Location">
+            <Input placeholder="e.g. Front windshield, Vehicle DXB-A-10000" />
+          </Form.Item>
+          <Form.Item name="vehicle_id" label="Vehicle">
+            <Select
+              placeholder="Select vehicle (optional)"
+              allowClear
+              showSearch
+              filterOption={(input, opt) => opt.label.toLowerCase().includes(input.toLowerCase())}
+              options={vehicles.map((v) => ({ label: `${v.plate_number} - ${v.model}`, value: v.id }))}
+            />
+          </Form.Item>
+          <Form.Item name="stream_url" label="Stream URL">
+            <Input placeholder="rtsp://... (optional)" />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  )
+}
