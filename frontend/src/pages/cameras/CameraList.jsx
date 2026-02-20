@@ -8,7 +8,7 @@ import {
   ReloadOutlined, VideoCameraOutlined,
 } from '@ant-design/icons'
 import { cameraService, vehicleService } from '@/services'
-import { CAMERA_TYPES, CAMERA_STATUSES } from '@/constants'
+import { CAMERA_TYPES, CAMERA_STATUSES, DEMO_WEBCAM_KEY } from '@/constants'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -16,13 +16,10 @@ dayjs.extend(relativeTime)
 
 const { Title, Text, Paragraph } = Typography
 
-const DEMO_WEBCAM_KEY = 'demo-webcam-api-key-for-testing-1234567890abcdef0123456789abcdef'
-
 function ConnectionInfo({ camera }) {
-  const localUrl = 'http://localhost:8000/api/webhook/violation'
-  const prodUrl = `${window.location.origin}/api/webhook/violation`
+  const webhookUrl = `${window.location.origin}/api/webhook/violation`
 
-  const curlSnippet = `curl -X POST ${localUrl} \\
+  const curlSnippet = `curl -X POST ${webhookUrl} \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: ${camera.api_key}" \\
   -d '{
@@ -38,7 +35,7 @@ function ConnectionInfo({ camera }) {
   const pythonSnippet = `import requests
 
 response = requests.post(
-    "${localUrl}",
+    "${webhookUrl}",
     json={
         "driver_id": 1,
         "vehicle_id": 1,
@@ -69,11 +66,8 @@ print(response.json())`
             <Text code copyable style={{ fontSize: 12 }}>{camera.api_key}</Text>
           </Space>
         </Descriptions.Item>
-        <Descriptions.Item label="Webhook URL (Localhost)">
-          <Text code copyable>{localUrl}</Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Webhook URL (Production)">
-          <Text code copyable>{prodUrl}</Text>
+        <Descriptions.Item label="Webhook URL">
+          <Text code copyable>{webhookUrl}</Text>
         </Descriptions.Item>
       </Descriptions>
 
@@ -185,7 +179,6 @@ export default function CameraList() {
       key: 'status',
       width: 100,
       render: (v, record) => {
-        const cs = CAMERA_STATUSES[v] || CAMERA_STATUSES.offline
         const isStale = record.last_heartbeat && dayjs().diff(dayjs(record.last_heartbeat), 'minute') > 5
         const effectiveStatus = v === 'online' && isStale ? 'offline' : v
         const effectiveCs = CAMERA_STATUSES[effectiveStatus] || CAMERA_STATUSES.offline

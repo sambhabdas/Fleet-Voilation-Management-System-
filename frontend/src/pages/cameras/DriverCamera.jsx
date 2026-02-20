@@ -10,7 +10,7 @@ import {
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 import { driverService, vehicleService, uploadService, cameraService, authService } from '@/services'
 import { useAuth } from '@/context/AuthContext'
-import { EVENT_TYPES, SEVERITY_COLORS, ROLES } from '@/constants'
+import { EVENT_TYPES, SEVERITY_COLORS, ROLES, DEMO_WEBCAM_KEY } from '@/constants'
 import useMediaRecorderBuffer from '@/hooks/useMediaRecorderBuffer'
 import useViolationAlerts from '@/hooks/useViolationAlerts'
 import useWebRTCPublisher from '@/hooks/useWebRTCPublisher'
@@ -18,7 +18,6 @@ import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
 
-const DEMO_WEBCAM_KEY = 'demo-webcam-api-key-for-testing-1234567890abcdef0123456789abcdef'
 const EAR_THRESHOLD = 0.55
 const EAR_CONSEC_FRAMES = 15
 const MAR_THRESHOLD = 0.6
@@ -152,7 +151,6 @@ export default function DriverCamera() {
       setFaceLandmarkerReady(true)
     } catch (err) {
       message.error('Failed to load face detection model')
-      console.error(err)
     } finally {
       setModelLoading(false)
     }
@@ -377,7 +375,6 @@ export default function DriverCamera() {
       }
     } catch (err) {
       message.error('Unable to access camera. Check permissions.')
-      console.error(err)
     }
   }
 

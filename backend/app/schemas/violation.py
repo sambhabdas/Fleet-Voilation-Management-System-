@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ReviewStatus(str, Enum):
@@ -25,6 +25,8 @@ class ViolationCreate(BaseModel):
 
 
 class ViolationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     driver_id: int
     vehicle_id: int
@@ -45,9 +47,6 @@ class ViolationResponse(BaseModel):
     reviewed_at: datetime | None = None
     review_notes: str | None = None
     created_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
 
 
 class ViolationListResponse(BaseModel):

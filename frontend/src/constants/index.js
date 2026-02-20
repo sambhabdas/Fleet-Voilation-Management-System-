@@ -51,6 +51,10 @@ export const CAMERA_TYPES = {
   webcam: { label: 'Webcam', color: '#52c41a' },
 }
 
+export const DEMO_WEBCAM_KEY = 'demo-webcam-api-key-for-testing-1234567890abcdef0123456789abcdef'
+
+export const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
+
 export const CAMERA_STATUSES = {
   online: { label: 'Online', color: 'green' },
   offline: { label: 'Offline', color: 'default' },

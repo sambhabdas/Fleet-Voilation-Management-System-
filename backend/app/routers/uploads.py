@@ -28,7 +28,7 @@ def _save_file(upload_file: UploadFile, subfolder: str) -> str:
     folder = os.path.join(UPLOAD_DIR, subfolder)
     os.makedirs(folder, exist_ok=True)
     ext = os.path.splitext(upload_file.filename or "file")[1] or ".bin"
-    filename = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(folder, filename)
     with open(filepath, "wb") as f:
         content = upload_file.file.read()

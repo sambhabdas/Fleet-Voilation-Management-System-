@@ -1,5 +1,3 @@
-from functools import wraps
-
 from fastapi import Depends, HTTPException, status
 
 from app.dependencies import get_current_user
@@ -19,4 +17,3 @@ def require_roles(*allowed_roles):
 
 require_admin = require_roles("ADMIN")
 require_manager_or_above = require_roles("ADMIN", "MANAGER")
-require_any_role = require_roles("ADMIN", "MANAGER", "VIEWER")

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class VehicleBase(BaseModel):
@@ -20,9 +20,8 @@ class VehicleUpdate(BaseModel):
 
 
 class VehicleResponse(VehicleBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     company_name: str | None = None
     driver_name: str | None = None
-
-    class Config:
-        from_attributes = True

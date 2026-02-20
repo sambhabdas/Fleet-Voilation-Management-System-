@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class CameraBase(BaseModel):
@@ -25,6 +25,8 @@ class CameraUpdate(BaseModel):
 
 
 class CameraResponse(CameraBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     api_key: str
     status: str
@@ -36,6 +38,3 @@ class CameraResponse(CameraBase):
     current_vehicle_id: int | None = None
     current_driver_name: str | None = None
     current_vehicle_plate: str | None = None
-
-    class Config:
-        from_attributes = True

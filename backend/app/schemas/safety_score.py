@@ -1,9 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SafetyScoreResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     driver_id: int
     driver_name: str | None = None
@@ -12,9 +14,6 @@ class SafetyScoreResponse(BaseModel):
     final_score: int
     risk_level: str
     created_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
 
 
 class FleetAverageResponse(BaseModel):

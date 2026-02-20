@@ -174,7 +174,7 @@ def review_violation(
     old_status = v.review_status
     v.review_status = data.review_status.value
     v.reviewed_by = current_user.id
-    v.reviewed_at = datetime.utcnow()
+    v.reviewed_at = datetime.now()
     if data.review_notes is not None:
         v.review_notes = data.review_notes
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class DriverBase(BaseModel):
@@ -22,6 +22,8 @@ class DriverUpdate(BaseModel):
 
 
 class DriverResponse(DriverBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int | None = None
     username: str | None = None
@@ -29,6 +31,3 @@ class DriverResponse(DriverBase):
     latest_score: int | None = None
     risk_level: str | None = None
     violation_count: int = 0
-
-    class Config:
-        from_attributes = True
