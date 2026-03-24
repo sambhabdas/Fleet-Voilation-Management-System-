@@ -6,6 +6,8 @@ export default function useViolationAlerts() {
   const oscillatorRef = useRef(null)
   const flashRef = useRef(null)
   const timeoutRef = useRef(null)
+  const speechQueueRef = useRef([])
+  const isSpeakingRef = useRef(false)
 
   const triggerAlert = useCallback((severity = 'high') => {
     setIsAlerting(true)
@@ -105,5 +107,108 @@ export default function useViolationAlerts() {
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
   }, [])
 
-  return { triggerAlert, stopAlert, isAlerting }
+  /**
+   * Voice announcement using Web Speech API
+   * @param {string} message - Text to speak
+   * @param {Object} options - Speech options
+   */
+  const speak = useCallback((message, options = {}) => {
+    const {
+      rate = 1.0, // Speech rate (0.1 - 10)
+      pitch = 1.0, // Pitch (0 - 2)
+      volume = 1.0, // Volume (0 - 1)
+      priority = false, // If true, interrupt current speech
+    } = options
+
+    if (!('speechSynthesis' in window)) {
+      console.warn('[VoiceAlert] Speech synthesis not supported')
+      return
+    }
+
+    // Cancel current speech if high priority
+    if (priority) {
+      window.speechSynthesis.cancel()
+      speechQueueRef.current = []
+      isSpeakingRef.current = false
+    }
+
+    const utterance = new SpeechSynthesisUtterance(message)
+    utterance.rate = rate
+    utterance.pitch = pitch
+    utterance.volume = volume
+
+    // Try to use a natural English voice
+    const voices = window.speechSynthesis.getVoices()
+    const preferredVoice = voices.find(
+      (voice) => voice.lang.startsWith('en') && voice.localService
+    ) || voices.find((voice) => voice.lang.startsWith('en'))
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice
+    }
+
+    utterance.onstart = () => {
+      isSpeakingRef.current = true
+    }
+
+    utterance.onend = () => {
+      isSpeakingRef.current = false
+      // Process next in queue
+      if (speechQueueRef.current.length > 0) {
+        const next = speechQueueRef.current.shift()
+        window.speechSynthesis.speak(next)
+      }
+    }
+
+    utterance.onerror = (event) => {
+      console.error('[VoiceAlert] Speech error:', event)
+      isSpeakingRef.current = false
+    }
+
+    // Queue or speak immediately
+    if (isSpeakingRef.current && !priority) {
+      speechQueueRef.current.push(utterance)
+    } else {
+      window.speechSynthesis.speak(utterance)
+    }
+  }, [])
+
+  /**
+   * Stop current voice announcement
+   */
+  const stopSpeaking = useCallback(() => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+      speechQueueRef.current = []
+      isSpeakingRef.current = false
+    }
+  }, [])
+
+  /**
+   * Trigger alert with voice announcement for stop signs
+   * @param {string} message - Voice message to announce
+   * @param {string} severity - Alert severity
+   */
+  const triggerVoiceAlert = useCallback((message, severity = 'high') => {
+    // Trigger visual/audio alert
+    triggerAlert(severity)
+
+    // Announce voice message
+    speak(message, {
+      rate: 0.9, // Slightly slower for clarity
+      pitch: severity === 'high' || severity === 'critical' ? 0.9 : 1.0,
+      volume: 1.0,
+      priority: true, // Interrupt any current speech
+    })
+  }, [triggerAlert, speak])
+
+  return {
+    triggerAlert,
+    stopAlert,
+    isAlerting,
+    speak,
+    stopSpeaking,
+    triggerVoiceAlert,
+    isSpeaking: isSpeakingRef.current,
+  }
 }

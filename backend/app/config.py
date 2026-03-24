@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     CORS_ORIGINS: str = "http://localhost:5173"
     WEBHOOK_API_KEY: str = "dashcam-webhook-secret-key"
+    FCM_SERVICE_ACCOUNT_PATH: str = ""
 
     class Config:
         env_file = ".env"

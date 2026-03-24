@@ -15,4 +15,6 @@ class User(Base):
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
     created_at = Column(DateTime, default=func.now())
 
+    fcm_token = Column(String(500), nullable=True)
+
     company = relationship("Company", back_populates="users")

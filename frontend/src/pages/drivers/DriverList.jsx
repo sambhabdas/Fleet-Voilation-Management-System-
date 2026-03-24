@@ -1,19 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Table, Card, Select, Typography, Input, Tag, Row, Col, Switch, Space,
+  Table, Card, Select, Typography, Input, Tag, Row, Col, Badge, Space, Switch,
   Button, Modal, Form, message,
 } from 'antd'
-import { SyncOutlined, PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined } from '@ant-design/icons'
 import RiskBadge from '@/components/common/RiskBadge'
 import { driverService, vehicleService } from '@/services'
 import { usePermission } from '@/hooks/usePermission'
 import { RISK_LEVELS } from '@/constants'
+import useRealtimeUpdates from '@/hooks/useRealtimeUpdates'
 import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
 const { Search } = Input
-const POLL_INTERVAL = 10000
 
 export default function DriverList() {
   const [drivers, setDrivers] = useState([])
@@ -21,10 +21,8 @@ export default function DriverList() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [riskFilter, setRiskFilter] = useState(null)
-  const [liveMode, setLiveMode] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
   const navigate = useNavigate()
-  const intervalRef = useRef(null)
 
   const { canEditDrivers } = usePermission()
   const [registerVisible, setRegisterVisible] = useState(false)
@@ -45,14 +43,12 @@ export default function DriverList() {
 
   useEffect(() => { fetchData(true) }, [fetchData])
 
-  useEffect(() => {
-    if (liveMode) {
-      intervalRef.current = setInterval(() => fetchData(false), POLL_INTERVAL)
+  // Real-time updates via WebSocket
+  useRealtimeUpdates(useCallback((eventType) => {
+    if (eventType === 'violation:new') {
+      fetchData(false)
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [liveMode, fetchData])
+  }, [fetchData]))
 
   useEffect(() => {
     if (canEditDrivers) {
@@ -159,13 +155,7 @@ export default function DriverList() {
                 Updated {dayjs(lastUpdated).format('HH:mm:ss')}
               </Text>
             )}
-            {liveMode && <SyncOutlined spin style={{ color: '#52c41a', fontSize: 14 }} />}
-            <Switch
-              checked={liveMode}
-              onChange={setLiveMode}
-              checkedChildren="LIVE"
-              unCheckedChildren="PAUSED"
-            />
+            <Badge status="success" text={<Text style={{ fontSize: 12 }}>Live</Text>} />
           </Space>
         </Col>
       </Row>

@@ -1,12 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Row, Col, Card, Table, Spin, Typography, Switch, Space } from 'antd'
+import { Row, Col, Card, Table, Spin, Typography, Badge, Space } from 'antd'
 import {
   WarningOutlined,
   TeamOutlined,
   SafetyCertificateOutlined,
   AlertOutlined,
-  SyncOutlined,
 } from '@ant-design/icons'
 import StatCard from '@/components/common/StatCard'
 import RiskBadge from '@/components/common/RiskBadge'
@@ -16,18 +15,16 @@ import ViolationTrendChart from '@/components/charts/ViolationTrendChart'
 import ViolationTypeChart from '@/components/charts/ViolationTypeChart'
 import RiskDistributionChart from '@/components/charts/RiskDistributionChart'
 import { dashboardService } from '@/services'
+import useRealtimeUpdates from '@/hooks/useRealtimeUpdates'
 import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
-const POLL_INTERVAL = 5000
 
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [liveMode, setLiveMode] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
   const navigate = useNavigate()
-  const intervalRef = useRef(null)
 
   const fetchData = useCallback((showSpinner = false) => {
     if (showSpinner) setLoading(true)
@@ -45,15 +42,12 @@ export default function Dashboard() {
     fetchData(true)
   }, [fetchData])
 
-  // Polling
-  useEffect(() => {
-    if (liveMode) {
-      intervalRef.current = setInterval(() => fetchData(false), POLL_INTERVAL)
+  // Real-time updates via WebSocket
+  useRealtimeUpdates(useCallback((eventType) => {
+    if (eventType === 'violation:new') {
+      fetchData(false)
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [liveMode, fetchData])
+  }, [fetchData]))
 
   if (loading && !data) {
     return <div style={{ textAlign: 'center', paddingTop: 100 }}><Spin size="large" /></div>
@@ -97,13 +91,7 @@ export default function Dashboard() {
                 Updated {dayjs(lastUpdated).format('HH:mm:ss')}
               </Text>
             )}
-            {liveMode && <SyncOutlined spin style={{ color: '#52c41a', fontSize: 14 }} />}
-            <Switch
-              checked={liveMode}
-              onChange={setLiveMode}
-              checkedChildren="LIVE"
-              unCheckedChildren="PAUSED"
-            />
+            <Badge status="success" text={<Text style={{ fontSize: 12 }}>Live</Text>} />
           </Space>
         </Col>
       </Row>

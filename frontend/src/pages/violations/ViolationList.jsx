@@ -1,26 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Table, Card, Select, DatePicker, Typography, Button, Row, Col, Switch, Space, Tag } from 'antd'
-import { SyncOutlined } from '@ant-design/icons'
+import { Table, Card, Select, DatePicker, Typography, Button, Row, Col, Badge, Space, Tag } from 'antd'
 import EventTypeTag from '@/components/common/EventTypeTag'
 import SeverityTag from '@/components/common/SeverityTag'
 import { violationService } from '@/services'
 import { EVENT_TYPES, REVIEW_STATUSES } from '@/constants'
+import useRealtimeUpdates from '@/hooks/useRealtimeUpdates'
 import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
 const { RangePicker } = DatePicker
-const POLL_INTERVAL = 5000
 
 export default function ViolationList() {
   const [violations, setViolations] = useState([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
   const [params, setParams] = useState({ page: 1, page_size: 20 })
-  const [liveMode, setLiveMode] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
   const navigate = useNavigate()
-  const intervalRef = useRef(null)
   const paramsRef = useRef(params)
 
   useEffect(() => { paramsRef.current = params }, [params])
@@ -45,14 +42,12 @@ export default function ViolationList() {
 
   useEffect(() => { fetchData(params, true) }, [])
 
-  useEffect(() => {
-    if (liveMode) {
-      intervalRef.current = setInterval(() => fetchData(null, false), POLL_INTERVAL)
+  // Real-time updates via WebSocket
+  useRealtimeUpdates(useCallback((eventType) => {
+    if (eventType === 'violation:new') {
+      fetchData(null, false)
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [liveMode, fetchData])
+  }, [fetchData]))
 
   const handleFilter = (key, value) => {
     const next = { ...params, [key]: value || undefined, page: 1 }
@@ -123,13 +118,7 @@ export default function ViolationList() {
                 Updated {dayjs(lastUpdated).format('HH:mm:ss')}
               </Text>
             )}
-            {liveMode && <SyncOutlined spin style={{ color: '#52c41a', fontSize: 14 }} />}
-            <Switch
-              checked={liveMode}
-              onChange={setLiveMode}
-              checkedChildren="LIVE"
-              unCheckedChildren="PAUSED"
-            />
+            <Badge status="success" text={<Text style={{ fontSize: 12 }}>Live</Text>} />
           </Space>
         </Col>
       </Row>

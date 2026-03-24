@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine, Base
 from app.models import User, Company, Vehicle, Driver, Violation, SafetyScore, Camera
-from app.routers import auth, companies, vehicles, drivers, violations, webhook, dashboard, reports, safety_scores, cameras, uploads, signaling
+from app.routers import auth, companies, vehicles, drivers, violations, webhook, dashboard, reports, safety_scores, cameras, uploads, signaling, notifications, fcm
 
 
 @asynccontextmanager
@@ -45,6 +45,8 @@ app.include_router(safety_scores.router)
 app.include_router(cameras.router)
 app.include_router(uploads.router)
 app.include_router(signaling.router)
+app.include_router(notifications.router)
+app.include_router(fcm.router)
 
 # Mount static files for uploads
 uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")

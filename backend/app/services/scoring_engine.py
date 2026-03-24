@@ -15,6 +15,8 @@ PENALTY_MAP = {
     "yawning": 5,
     "sudden_acceleration": 5,
     "distracted": 15,
+    "stop_sign_detected": 0,  # Informational only
+    "stop_sign_violation": 25,  # Running a stop sign
 }
 
 

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header
@@ -7,14 +8,19 @@ from app.database import get_db
 from app.config import settings
 from app.models.violation import Violation
 from app.models.camera import Camera
+from app.models.driver import Driver
+from app.models.vehicle import Vehicle
+from app.models.user import User
 from app.schemas.violation import WebhookPayload
 from app.services.scoring_engine import get_penalty_points, calculate_monthly_score
+from app.routers.notifications import broadcast_event
+from app.services.fcm_service import send_violation_notification
 
 router = APIRouter(prefix="/api/webhook", tags=["webhook"])
 
 
 @router.post("/violation", status_code=201)
-def receive_violation(
+async def receive_violation(
     payload: WebhookPayload,
     x_api_key: str = Header(...),
     db: Session = Depends(get_db),
@@ -56,5 +62,38 @@ def receive_violation(
         camera.status = "online"
         camera.last_heartbeat = datetime.now(timezone.utc)
         db.commit()
+
+    # Resolve driver and vehicle names for notifications
+    driver = db.query(Driver).filter(Driver.id == v.driver_id).first()
+    vehicle = db.query(Vehicle).filter(Vehicle.id == v.vehicle_id).first()
+    driver_name = driver.name if driver else "Unknown"
+    vehicle_plate = vehicle.plate_number if vehicle else "Unknown"
+
+    violation_data = {
+        "id": v.id,
+        "driver_id": v.driver_id,
+        "vehicle_id": v.vehicle_id,
+        "driver_name": driver_name,
+        "vehicle_plate": vehicle_plate,
+        "event_type": v.event_type,
+        "severity": v.severity,
+        "penalty_points": v.penalty_points,
+        "timestamp": v.timestamp.isoformat(),
+        "speed": v.speed,
+        "snapshot_url": v.snapshot_url,
+    }
+
+    # Broadcast to WebSocket clients
+    await broadcast_event("violation:new", violation_data)
+
+    # Send FCM push notifications to ADMIN/MANAGER users
+    fcm_tokens = [
+        u.fcm_token for u in db.query(User).filter(
+            User.role.in_(["ADMIN", "MANAGER"]),
+            User.fcm_token.isnot(None),
+        ).all()
+    ]
+    if fcm_tokens:
+        send_violation_notification(fcm_tokens, violation_data)
 
     return {"id": v.id, "message": "Violation recorded successfully"}

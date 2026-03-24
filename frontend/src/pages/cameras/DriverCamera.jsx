@@ -14,6 +14,9 @@ import { EVENT_TYPES, SEVERITY_COLORS, ROLES, DEMO_WEBCAM_KEY } from '@/constant
 import useMediaRecorderBuffer from '@/hooks/useMediaRecorderBuffer'
 import useViolationAlerts from '@/hooks/useViolationAlerts'
 import useWebRTCPublisher from '@/hooks/useWebRTCPublisher'
+import useStopSignCamera from '@/hooks/useStopSignCamera'
+import useStopSignFusion from '@/hooks/useStopSignFusion'
+import osmService from '@/services/osmService'
 import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
@@ -30,6 +33,8 @@ const RIGHT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 3
 const MOUTH = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185]
 
 export default function DriverCamera() {
+  // Siren audio ref
+  const sirenAudioRef = useRef(null)
   const [cameraActive, setCameraActive] = useState(false)
   const [faceLandmarkerReady, setFaceLandmarkerReady] = useState(false)
   const [modelLoading, setModelLoading] = useState(false)
@@ -48,6 +53,14 @@ export default function DriverCamera() {
   const [violationLog, setViolationLog] = useState([])
   const [detectionEnabled, setDetectionEnabled] = useState(true)
   const [violationCount, setViolationCount] = useState(0)
+
+  // Stop sign detection state
+  const [trafficSigns, setTrafficSigns] = useState([])
+  const [stopSignAlerts, setStopSignAlerts] = useState([])
+  const [gpsEnabled, setGpsEnabled] = useState(false)
+  const [cameraStopSignEnabled, setCameraStopSignEnabled] = useState(true)
+  const [currentLocation, setCurrentLocation] = useState(null)
+  const [currentHeading, setCurrentHeading] = useState(0)
 
   // Simulated sensors
   const [speed, setSpeed] = useState(60)
@@ -71,9 +84,15 @@ export default function DriverCamera() {
   const heartbeatIntervalRef = useRef(null)
   const faceNotVisibleFramesRef = useRef(0)
 
-  const { triggerAlert, isAlerting } = useViolationAlerts()
+  const { triggerAlert, isAlerting, triggerVoiceAlert } = useViolationAlerts()
   const mediaBuffer = useMediaRecorderBuffer()
   const { publish, unpublish, isPublishing, peerCount } = useWebRTCPublisher(cameraDbId)
+
+  // Stop sign refs (locationRef must exist for fusion getLocation — was missing and broke camera alerts)
+  const locationRef = useRef(null)
+  const headingRef = useRef(0)
+  const gpsIntervalRef = useRef(null)
+  const stopSignBboxRef = useRef(null)
 
   useEffect(() => { detectionEnabledRef.current = detectionEnabled }, [detectionEnabled])
   useEffect(() => { selectedDriverRef.current = selectedDriver }, [selectedDriver])
@@ -155,6 +174,206 @@ export default function DriverCamera() {
       setModelLoading(false)
     }
   }, [])
+
+  // Handle stop sign violation
+  const handleStopSignViolation = useCallback((violationType, data) => {
+    console.log('[StopSign] Violation triggered:', violationType, data)
+
+    // For stop signs, we send violation directly with special event type
+    const eventType = violationType === 'STOP_SIGN_VIOLATION' ? 'stop_sign_violation' : 'stop_sign_detected'
+
+    // Trigger voice alert for stop signs
+    const voiceMessage = data.signLabel === 'Stop Sign'
+      ? 'Stop sign ahead. Prepare to stop.'
+      : data.signLabel === 'Traffic Light'
+        ? 'Traffic light ahead.'
+        : 'Traffic sign ahead.'
+
+    triggerVoiceAlert(voiceMessage, 'high')
+
+    // Play siren sound
+    if (sirenAudioRef.current) {
+      sirenAudioRef.current.currentTime = 0
+      sirenAudioRef.current.play().catch((e) => {
+        // Some browsers require user interaction before playing audio
+        console.warn('Siren audio play failed:', e)
+      })
+    }
+
+    // Send to backend
+    const now = Date.now()
+    const lastTime = lastViolationTimeRef.current[eventType] || 0
+    if (now - lastTime < VIOLATION_COOLDOWN) return
+
+    const driverId = selectedDriverRef.current
+    const vehicleId = selectedVehicleRef.current
+    if (!driverId || !vehicleId) return
+
+    lastViolationTimeRef.current[eventType] = now
+
+    const payload = {
+      driver_id: driverId,
+      vehicle_id: vehicleId,
+      event_type: eventType,
+      severity: 'high',
+      timestamp: new Date().toISOString(),
+      speed: data.speed,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      snapshot_url: null,
+      clip_url: null,
+    }
+
+    fetch('/api/webhook/violation', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': DEMO_WEBCAM_KEY,
+      },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((result) => {
+        setViolationLog((prev) => [{
+          id: result.id,
+          event_type: eventType,
+          severity: 'high',
+          speed: data.speed,
+          timestamp: new Date(),
+          isStopSign: true,
+        }, ...prev].slice(0, 50))
+        setViolationCount((c) => c + 1)
+      })
+      .catch(console.error)
+  }, [triggerVoiceAlert])
+
+  // Initialize fusion engine
+  const fusion = useStopSignFusion({
+    getLocation: () => locationRef.current,
+    getSpeed: () => speedRef.current,
+    triggerViolation: handleStopSignViolation,
+    trafficSigns,
+  })
+
+  // Stop sign camera detection
+  const handleCameraDetection = useCallback((detection) => {
+    console.log('[StopSign] Camera detection received:', detection)
+    if (!cameraStopSignEnabled) {
+      console.log('[StopSign] Detection ignored - cameraStopSignEnabled is false')
+      return
+    }
+    const alert = fusion.processCameraDetection(detection)
+    console.log('[StopSign] Fusion result:', alert)
+    if (alert) {
+      setStopSignAlerts((prev) => [alert, ...prev].slice(0, 5))
+    }
+  }, [fusion, cameraStopSignEnabled])
+
+  const handleCameraLost = useCallback((detection) => {
+    console.log('[StopSign] Lost detection:', detection)
+  }, [])
+
+  // Use front camera for stop sign detection (reuse videoRef)
+  const { startDetection: startStopSignDetection, stopDetection: stopStopSignDetection } = useStopSignCamera(
+    videoRef,
+    handleCameraDetection,
+    handleCameraLost,
+    stopSignBboxRef,
+  )
+
+  // Fetch OSM traffic signs when location is available
+  useEffect(() => {
+    if (!gpsEnabled || !locationRef.current) return
+
+    const fetchSigns = async () => {
+      const loc = locationRef.current
+      console.log('[StopSign] Fetching signs near:', loc)
+      const signs = await osmService.fetchTrafficSigns(loc.lat, loc.lng, 3000)
+      setTrafficSigns(signs)
+    }
+
+    fetchSigns()
+  }, [gpsEnabled])
+
+  // GPS tracking for stop sign alerts
+  useEffect(() => {
+    if (!gpsEnabled) {
+      if (gpsIntervalRef.current) {
+        clearInterval(gpsIntervalRef.current)
+        gpsIntervalRef.current = null
+      }
+      setCurrentLocation(null)
+      return
+    }
+
+    // Check if geolocation is supported
+    if (!('geolocation' in navigator)) {
+      console.warn('[StopSign] Geolocation not supported')
+      setGpsEnabled(false)
+      return
+    }
+
+    // High-accuracy position tracking
+    const successCallback = (position) => {
+      const newLocation = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      }
+      locationRef.current = newLocation
+      setCurrentLocation(newLocation)
+
+      // Get heading from GPS if available
+      if (position.coords.heading !== null) {
+        headingRef.current = position.coords.heading
+        setCurrentHeading(position.coords.heading)
+      }
+
+      // Process GPS-based stop sign detection
+      if (cameraActive && detectionEnabled) {
+        const alerts = fusion.processGPS()
+        if (alerts && alerts.length > 0) {
+          setStopSignAlerts(alerts.slice(0, 3))
+        }
+      }
+    }
+
+    const errorCallback = (error) => {
+      console.error('[StopSign] GPS error:', error)
+      setGpsEnabled(false)
+    }
+
+    // Get initial position
+    navigator.geolocation.getCurrentPosition(successCallback, errorCallback, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 1000,
+    })
+
+    // Watch position with throttled updates
+    const watchId = navigator.geolocation.watchPosition(successCallback, errorCallback, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 1000,
+    })
+
+    // Also poll for updates every 2 seconds
+    gpsIntervalRef.current = setInterval(() => {
+      navigator.geolocation.getCurrentPosition(successCallback, errorCallback, {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 1000,
+      })
+    }, 2000)
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId)
+      if (gpsIntervalRef.current) {
+        clearInterval(gpsIntervalRef.current)
+        gpsIntervalRef.current = null
+      }
+    }
+  }, [gpsEnabled, cameraActive, detectionEnabled])
 
   const sendViolation = useCallback(async (eventType, severity, eventSpeed) => {
     const now = Date.now()
@@ -347,6 +566,17 @@ export default function DriverCamera() {
     ctx.fillText(`Speed: ${speedRef.current} km/h`, 10, 58)
     ctx.shadowBlur = 0
 
+    const ss = stopSignBboxRef.current
+    if (ss?.bbox) {
+      const [bx, by, bw, bh] = ss.bbox
+      ctx.strokeStyle = '#ff4d4f'
+      ctx.lineWidth = 3
+      ctx.strokeRect(bx, by, bw, bh)
+      ctx.fillStyle = 'rgba(255, 77, 79, 0.9)'
+      ctx.font = 'bold 14px sans-serif'
+      ctx.fillText(ss.label || 'STOP SIGN', bx, Math.max(16, by - 6))
+    }
+
     animationRef.current = requestAnimationFrame(detectFrame)
   }, [sendViolation])
 
@@ -366,6 +596,7 @@ export default function DriverCamera() {
           animationRef.current = requestAnimationFrame(detectFrame)
           mediaBuffer.start(stream)
           publish(stream)
+          startStopSignDetection() // Start stop sign camera detection
           // Send initial heartbeat and start periodic heartbeat
           cameraService.heartbeat(DEMO_WEBCAM_KEY, selectedDriverRef.current, selectedVehicleRef.current).catch(console.error)
           heartbeatIntervalRef.current = setInterval(() => {
@@ -386,6 +617,8 @@ export default function DriverCamera() {
     if (videoRef.current) videoRef.current.srcObject = null
     mediaBuffer.stop()
     unpublish()
+    stopStopSignDetection() // Stop stop sign camera detection
+    stopSignBboxRef.current = null
     if (heartbeatIntervalRef.current) {
       clearInterval(heartbeatIntervalRef.current)
       heartbeatIntervalRef.current = null
@@ -397,7 +630,7 @@ export default function DriverCamera() {
     earHistoryRef.current = []
     marHistoryRef.current = []
     faceNotVisibleFramesRef.current = 0
-  }, [mediaBuffer, unpublish])
+  }, [mediaBuffer, unpublish, stopStopSignDetection])
 
   useEffect(() => {
     return () => {
@@ -406,6 +639,7 @@ export default function DriverCamera() {
       if (faceLandmarkerRef.current) faceLandmarkerRef.current.close()
       if (sensorIntervalRef.current) clearInterval(sensorIntervalRef.current)
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current)
+      if (gpsIntervalRef.current) clearInterval(gpsIntervalRef.current)
     }
   }, [])
 
@@ -413,6 +647,8 @@ export default function DriverCamera() {
 
   return (
     <div>
+      {/* Siren audio element (hidden) */}
+      <audio ref={sirenAudioRef} src="/siren.mp3" preload="auto" style={{ display: 'none' }} />
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
         <Col>
           <Title level={4} style={{ margin: 0 }}>Driver Camera</Title>
@@ -459,7 +695,7 @@ export default function DriverCamera() {
             />
           </Col>
           <Col span={10}>
-            <Space>
+            <Space wrap>
               <Button
                 type="primary"
                 icon={cameraActive ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
@@ -472,8 +708,23 @@ export default function DriverCamera() {
               <Switch
                 checked={detectionEnabled}
                 onChange={setDetectionEnabled}
-                checkedChildren="Detection ON"
-                unCheckedChildren="Detection OFF"
+                checkedChildren="Face Detection ON"
+                unCheckedChildren="Face Detection OFF"
+                size="small"
+              />
+              <Switch
+                checked={gpsEnabled}
+                onChange={setGpsEnabled}
+                checkedChildren="GPS ON"
+                unCheckedChildren="GPS OFF"
+                size="small"
+              />
+              <Switch
+                checked={cameraStopSignEnabled}
+                onChange={setCameraStopSignEnabled}
+                checkedChildren="Stop Sign Detection ON"
+                unCheckedChildren="Stop Sign Detection OFF"
+                size="small"
               />
             </Space>
           </Col>
@@ -619,6 +870,18 @@ export default function DriverCamera() {
                 </div>
               </Col>
             </Row>
+            {gpsEnabled && currentLocation && (
+              <div style={{ marginTop: 12, fontSize: 12 }}>
+                <Tag icon={<DashboardOutlined />} color="blue">
+                  GPS: {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
+                </Tag>
+                {currentHeading !== 0 && (
+                  <Tag style={{ marginLeft: 4 }} color="cyan">
+                    Heading: {Math.round(currentHeading)}°
+                  </Tag>
+                )}
+              </div>
+            )}
           </Card>
 
           {/* Manual Triggers */}
@@ -652,7 +915,7 @@ export default function DriverCamera() {
           </Card>
 
           {/* Active Alerts */}
-          {(alerts.drowsy || alerts.yawning || isBraking || isAccelerating) && (
+          {(alerts.drowsy || alerts.yawning || isBraking || isAccelerating || stopSignAlerts.length > 0) && (
             <Card
               size="small"
               style={{
@@ -669,6 +932,41 @@ export default function DriverCamera() {
                 {alerts.yawning && <Tag color="orange">Yawning Detected</Tag>}
                 {isBraking && <Tag color="red">Harsh Braking</Tag>}
                 {isAccelerating && <Tag color="orange">Sudden Acceleration</Tag>}
+                {stopSignAlerts.map((alert, idx) => (
+                  <Tag key={idx} color="red" style={{ fontSize: 12 }}>
+                    {alert.priority >= 3 ? '\u26A0 URGENT: ' : '\u26A0 '}
+                    {alert.message}
+                    {alert.distance && ` (${Math.round(alert.distance)}m)`}
+                  </Tag>
+                ))}
+              </Space>
+            </Card>
+          )}
+
+          {/* Traffic Signs Info */}
+          {gpsEnabled && (
+            <Card
+              size="small"
+              title="Traffic Signs (OSM)"
+              style={{ marginBottom: 16 }}
+            >
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  <Text>Loaded: {trafficSigns.length} signs</Text>
+                </div>
+                {trafficSigns.length === 0 ? (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {currentLocation ? 'No traffic signs nearby' : 'Waiting for GPS...'}
+                  </Text>
+                ) : (
+                  <div style={{ maxHeight: 150, overflow: 'auto' }}>
+                    {trafficSigns.slice(0, 10).map((sign, idx) => (
+                      <Tag key={idx} color="blue" style={{ marginBottom: 4 }}>
+                        {sign.label} ({Math.round(sign.distance)}m)
+                      </Tag>
+                    ))}
+                  </div>
+                )}
               </Space>
             </Card>
           )}

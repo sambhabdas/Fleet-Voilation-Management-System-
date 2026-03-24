@@ -10,6 +10,7 @@ from app.core.permissions import require_admin
 from app.models.camera import Camera
 from app.models.user import User
 from app.schemas.camera import CameraCreate, CameraUpdate, CameraResponse
+from app.routers.notifications import broadcast_event
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 
@@ -131,7 +132,7 @@ def regenerate_api_key(
 
 
 @router.post("/heartbeat")
-def camera_heartbeat(
+async def camera_heartbeat(
     x_api_key: str = Header(...),
     driver_id: int | None = Query(None),
     vehicle_id: int | None = Query(None),
@@ -145,4 +146,15 @@ def camera_heartbeat(
     camera.current_driver_id = driver_id
     camera.current_vehicle_id = vehicle_id
     db.commit()
+
+    # Broadcast camera heartbeat to WebSocket clients
+    await broadcast_event("camera:heartbeat", {
+        "camera_id": camera.id,
+        "name": camera.name,
+        "status": "online",
+        "last_heartbeat": camera.last_heartbeat.isoformat(),
+        "current_driver_id": driver_id,
+        "current_vehicle_id": vehicle_id,
+    })
+
     return {"status": "ok", "camera_id": camera.id}

@@ -9,6 +9,7 @@ import {
 import { cameraService, violationService } from '@/services'
 import { EVENT_TYPES, SEVERITY_COLORS, CAMERA_STATUSES, REVIEW_STATUSES } from '@/constants'
 import useWebRTCViewer from '@/hooks/useWebRTCViewer'
+import useRealtimeUpdates from '@/hooks/useRealtimeUpdates'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -112,15 +113,21 @@ export default function ManagerMonitoring() {
       .catch(console.error)
   }, [])
 
+  // Initial load
   useEffect(() => {
     fetchCameras()
     fetchViolations()
-    const interval = setInterval(() => {
-      fetchCameras()
-      fetchViolations()
-    }, 5000)
-    return () => clearInterval(interval)
   }, [fetchCameras, fetchViolations])
+
+  // Real-time updates via WebSocket
+  useRealtimeUpdates(useCallback((eventType) => {
+    if (eventType === 'violation:new') {
+      fetchViolations()
+    }
+    if (eventType === 'camera:heartbeat') {
+      fetchCameras()
+    }
+  }, [fetchCameras, fetchViolations]))
 
   const getCameraEffectiveStatus = (camera) => {
     if (camera.status !== 'online') return 'offline'

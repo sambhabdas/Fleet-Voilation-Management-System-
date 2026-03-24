@@ -28,6 +28,8 @@ export const EVENT_TYPES = {
   yawning: { label: 'Yawning', color: '#13c2c2', penalty: 5 },
   sudden_acceleration: { label: 'Sudden Acceleration', color: '#eb2f96', penalty: 5 },
   distracted: { label: 'Distracted / Not Looking', color: '#595959', penalty: 15 },
+  stop_sign_detected: { label: 'Stop Sign Ahead', color: '#fa8c16', penalty: 0 },
+  stop_sign_violation: { label: 'Stop Sign Violation', color: '#f5222d', penalty: 25 },
 }
 
 export const RISK_LEVELS = {
@@ -67,3 +69,16 @@ export const REVIEW_STATUSES = {
   confirmed: { label: 'Confirmed', color: 'red' },
   dismissed: { label: 'Dismissed', color: 'default' },
 }
+
+// Firebase configuration — replace with your actual Firebase project values
+export const FIREBASE_CONFIG = {
+  apiKey: '',
+  authDomain: '',
+  projectId: '',
+  storageBucket: '',
+  messagingSenderId: '',
+  appId: '',
+}
+
+// VAPID key for FCM web push — get from Firebase Console > Project Settings > Cloud Messaging
+export const FIREBASE_VAPID_KEY = ''

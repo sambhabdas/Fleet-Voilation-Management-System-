@@ -10,3 +10,4 @@ python-multipart==0.0.12
 python-dotenv==1.0.1
 aiofiles==24.1.0
 websockets==14.1
+firebase-admin>=6.0.0
