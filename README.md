@@ -14,7 +14,7 @@ AI-powered fleet safety monitoring and violation tracking system with real-time 
 - [Features](#features)
   - [Dashboard & Analytics](#dashboard--analytics)
   - [Driver Camera & AI Detection](#driver-camera--ai-detection)
-  - [Stop Sign & OSM Alerts](#stop-sign--osm-alerts)
+  - [Stop Sign Detection (Visual + GPS Fusion)](#stop-sign-detection-visual--gps-fusion)
   - [Live Monitoring via WebRTC](#live-monitoring-via-webrtc)
   - [Violation Management & Review](#violation-management--review)
   - [Safety Scoring Engine](#safety-scoring-engine)
@@ -25,8 +25,10 @@ AI-powered fleet safety monitoring and violation tracking system with real-time 
 - [Database Schema](#database-schema)
 - [WebRTC Streaming Architecture](#webrtc-streaming-architecture)
 - [MediaPipe Face Detection](#mediapipe-face-detection)
+- [Stop Sign Object Detection](#stop-sign-object-detection)
 - [Frontend Architecture](#frontend-architecture)
 - [Configuration](#configuration)
+- [Internal Developer Guide](#internal-developer-guide)
 
 ---
 
@@ -36,14 +38,14 @@ This system monitors fleet driver behavior in real-time using browser-based AI f
 
 **Key capabilities:**
 
-- **Browser-based AI detection** -- No server-side GPU needed. MediaPipe runs entirely in the browser using WebGL/GPU acceleration
+- **Browser-based AI detection** -- No server-side GPU needed. MediaPipe (face) and TensorFlow.js COCO-SSD (stop signs) run entirely in the browser using WebGL/GPU acceleration
 - **Peer-to-peer video streaming** -- WebRTC connects driver cameras directly to manager monitoring screens, with WebSocket signaling through the backend
 - **Automated evidence capture** -- Rolling 20-second video buffer captures 5 seconds before and 10 seconds after each violation, plus instant JPEG snapshots
-- **Stop sign & traffic light detection** -- A **second pipeline** alongside MediaPipe runs in the browser: TensorFlow.js [COCO-SSD](https://github.com/tensorflow/tfjs-models/tree/master/coco-ssd) detects **stop signs** and **traffic lights** on the webcam feed, draws an optional bounding-box overlay, and can log **`stop_sign_detected`** (informational) or **`stop_sign_violation`** (high severity) via the existing webhook. **GPS + OpenStreetMap** (Overpass API) can be enabled to fuse map data with camera detections for route-context alerts. See [Stop Sign & OSM Alerts](#stop-sign--osm-alerts).
-- **Driver feedback** -- Voice prompts (Web Speech API), siren (`frontend/public/siren.mp3`), flash overlay, and vibration mirror other high-severity alerts when stop-sign events are reported.
+- **Stop sign detection with sensor fusion** -- Visual COCO-SSD detection is fused with GPS speed and OpenStreetMap sign data. An on-screen alert + siren (`frontend/public/siren.mp3`) fires on approach, and a `stop_sign_violation` is recorded if the vehicle runs the sign at speed
 - **Monthly safety scoring** -- 100-point scale with automatic penalty calculation and risk level classification (Low/Moderate/High/Critical)
 - **Role-based access** -- Four roles (Admin, Manager, Viewer, Driver) with tailored navigation and permissions
 - **Simulated vehicle sensors** -- Speed, harsh braking, and sudden acceleration events for demo purposes
+- **Camera webhook simulator** -- `backend/simulate_camera.py` replays realistic dashcam events against the live backend for load testing and dashboard demos
 
 ---
 
@@ -52,8 +54,7 @@ This system monitors fleet driver behavior in real-time using browser-based AI f
 ```
                         +------------------+
                         |   React Frontend |
-                        | (Vite + MediaPipe |
-                        |  + TensorFlow.js) |
+                        |   (Vite + Antd)  |
                         +--------+---------+
                                  |
                     Vite Dev Proxy (port 5173)
@@ -77,8 +78,7 @@ This system monitors fleet driver behavior in real-time using browser-based AI f
     +--------------+                  +--------------+
     | getUserMedia  |   WebRTC P2P    | <video> tag  |
     | MediaPipe AI  | =============> | Live feed    |
-    | COCO-SSD (TF) |                 | Camera cards |
-    | MediaRecorder |                 |              |
+    | MediaRecorder |                 | Camera cards |
     +--------------+                  +--------------+
 ```
 
@@ -111,8 +111,7 @@ This system monitors fleet driver behavior in real-time using browser-based AI f
 | React Router | 7.13.0 | Client-side routing |
 | Day.js | 1.11.19 | Date formatting |
 | MediaPipe Tasks Vision | 0.10.32 | Browser-based face detection (FaceLandmarker) |
-| TensorFlow.js | 4.22.0 | WebGL backend for in-browser object detection |
-| COCO-SSD (`@tensorflow-models/coco-ssd`) | 2.2.3 | Stop sign / traffic light detection on the video element |
+| TensorFlow.js + COCO-SSD | latest | Browser-based object detection (stop signs, traffic lights) |
 
 ---
 
@@ -140,8 +139,6 @@ Fleet_Violation_Monitoring/
 │   │   │   ├── drivers.py           # Driver CRUD + auto user creation
 │   │   │   ├── violations.py        # Violation CRUD + review workflow
 │   │   │   ├── webhook.py           # Ingest violations from cameras
-│   │   │   ├── notifications.py    # WebSocket broadcast for live violation feed
-│   │   │   ├── fcm.py               # FCM device registration / push (optional)
 │   │   │   ├── cameras.py           # Camera CRUD + heartbeat
 │   │   │   ├── uploads.py           # Snapshot & clip file uploads
 │   │   │   ├── dashboard.py         # Dashboard aggregation
@@ -157,8 +154,7 @@ Fleet_Violation_Monitoring/
 │   │   │   ├── safety_score.py      # Score + fleet average schemas
 │   │   │   └── camera.py            # Camera schemas
 │   │   ├── services/
-│   │   │   ├── scoring_engine.py    # Penalty calculation (+ stop_sign_* types)
-│   │   │   ├── fcm_service.py       # Firebase Cloud Messaging helpers
+│   │   │   ├── scoring_engine.py    # Penalty calculation + risk levels
 │   │   │   ├── dashboard_service.py # Dashboard data aggregation
 │   │   │   └── report_service.py    # Report generation logic
 │   │   ├── database.py              # SQLAlchemy engine + session
@@ -200,7 +196,7 @@ Fleet_Violation_Monitoring/
 │   │   │   ├── vehicles/VehicleList.jsx   # Vehicle table
 │   │   │   ├── cameras/
 │   │   │   │   ├── CameraList.jsx         # Camera management
-│   │   │   │   └── DriverCamera.jsx       # Face + stop-sign + streaming + GPS/OSM toggles
+│   │   │   │   └── DriverCamera.jsx       # AI detection + streaming
 │   │   │   ├── monitoring/
 │   │   │   │   └── ManagerMonitoring.jsx  # Live camera grid
 │   │   │   └── reports/Reports.jsx        # Analytics reports
@@ -208,24 +204,12 @@ Fleet_Violation_Monitoring/
 │   │   │   ├── useWebRTCPublisher.js      # Stream camera to viewers
 │   │   │   ├── useWebRTCViewer.js         # Receive live stream
 │   │   │   ├── useMediaRecorderBuffer.js  # Rolling buffer + evidence
-│   │   │   ├── useViolationAlerts.js      # Audio + visual + haptic + voice (TTS)
-│   │   │   ├── useStopSignCamera.js       # COCO-SSD loop on `<video>` (parallel to MediaPipe)
-│   │   │   ├── useStopSignFusion.js       # Camera + GPS/OSM fusion + alert cooldowns
-│   │   │   ├── useRealtimeUpdates.js      # Live updates (e.g. WebSocket / polling)
+│   │   │   ├── useViolationAlerts.js      # Audio + visual + haptic
 │   │   │   └── usePermission.js           # Role-based feature flags
-│   │   ├── services/
-│   │   │   ├── index.js                   # Axios API client
-│   │   │   ├── api.js                     # API helpers
-│   │   │   ├── osmService.js              # Overpass API traffic signs near GPS
-│   │   │   └── fcm.js                     # Firebase messaging (optional)
-│   │   ├── utils/
-│   │   │   └── geo.js                     # Haversine distance, nearby signs helpers
+│   │   ├── services/index.js              # Axios API client
 │   │   ├── context/AuthContext.jsx         # Auth state management
 │   │   ├── constants/index.js             # Shared constants
 │   │   └── routes/index.jsx               # Route definitions
-│   ├── public/
-│   │   ├── siren.mp3                      # Played on stop-sign related alerts
-│   │   └── firebase-messaging-sw.js       # FCM service worker (optional)
 │   ├── vite.config.js
 │   └── package.json
 │
@@ -292,6 +276,21 @@ cd backend
 rm fleet_violations.db
 python seed.py
 ```
+
+### Replaying Dashcam Events (Simulator)
+
+`backend/simulate_camera.py` posts weighted-random violations to `/api/webhook/violation` with realistic drivers, routes, speeds, and timestamps. Useful for populating dashboards without a live camera.
+
+```bash
+cd backend
+source venv/bin/activate
+python simulate_camera.py                      # 1 event every 5 s (default)
+python simulate_camera.py --interval 3 --burst 5  # 5 events every 3 s
+python simulate_camera.py --count 50           # send 50 and exit
+python simulate_camera.py --url http://remote.example.com/api/webhook/violation
+```
+
+The simulator uses the global webhook key (`dashcam-webhook-secret-key`) and the driver/vehicle IDs created by `seed.py`.
 
 ---
 
@@ -373,24 +372,17 @@ The core detection component runs entirely in the browser:
 - Driver identity is auto-selected from their linked profile (no dropdown)
 - They only need to select a vehicle and click Start Camera
 
-### Stop Sign & OSM Alerts
+### Stop Sign Detection (Visual + GPS Fusion)
 
-Stop-sign and traffic-light handling is implemented **alongside** MediaPipe: the face loop is unchanged; a separate **TensorFlow.js COCO-SSD** timer runs on the same `<video>` element.
+Running in parallel with the face pipeline, the Driver Camera uses TensorFlow.js COCO-SSD (MobileNet v2) to spot stop signs and traffic lights in the video feed. Detections are then fused with GPS speed and nearby OpenStreetMap signs before an alert or violation is recorded:
 
-| Piece | Role |
-|-------|------|
-| `useStopSignCamera.js` | Loads COCO-SSD with a supported base model (`mobilenet_v2` by default—must be one of `mobilenet_v1`, `mobilenet_v2`, `lite_mobilenet_v2`), uses the **WebGL** backend, runs ~300 ms detection intervals, and requires consecutive high-confidence frames before firing. Detects classes **`stop sign`** and **`traffic light`**. Updates an optional bbox ref for on-canvas debug drawing. |
-| `useStopSignFusion.js` | Combines camera output with **GPS** and **OSM** sign lists: distances via `utils/geo.js`, alert priorities, cooldowns, and calls `handleStopSignViolation` so voice + siren + webhook run on real events. |
-| `osmService.js` | Fetches nearby traffic control nodes from the **Overpass API** (stop, yield, signals, etc.), with simple client-side caching. |
-
-**Behavior summary:**
-
-- **Camera only (GPS off):** Fusion still raises **`stop_sign_detected`** when the model is confident enough, so you can test at a desk. Latitude/longitude on the webhook may be omitted when GPS is unavailable.
-- **GPS + OSM on:** Signs near the vehicle are loaded and matched by type where possible (e.g. OSM `stop_sign` ↔ camera `STOP_SIGN`). Fused alerts can escalate to **`stop_sign_violation`** when distance/speed rules indicate running the stop.
-- **UI:** Toggles for face detection, **GPS**, and **Stop sign detection**. Active alerts appear next to other driver warnings; stop-sign events may also surface in the detection log with types `stop_sign_detected` / `stop_sign_violation`.
-- **Webhook:** Same `POST /api/webhook/violation` flow as other events; `driver_id` and `vehicle_id` must be set on the Driver Camera page for records to be created. A **10 second** cooldown applies per event type to reduce duplicate posts.
-
-**Testing tips:** Hold a **large**, high-contrast image (printed sign is more reliable than a phone screen). Ensure the browser console shows a successful COCO-SSD load with no “invalid base model” error.
+1. **Visual detection** -- `useStopSignCamera` polls the video element every 250 ms. A sign is confirmed after 2 consecutive frames above threshold (0.28 normal / 0.22 on a zoomed center crop).
+2. **Sensor fusion** -- `useStopSignFusion` combines detection + GPS + OSM signs and picks an alert priority:
+   - `INFO` at <=150 m, `WARNING` at <=100 m, `URGENT` at <=50 m
+   - `VIOLATION` if <50 m *and* speed >30 km/h -- recorded as `stop_sign_violation` (25 penalty points)
+   - Approach-only hits are recorded as `stop_sign_detected` (0 penalty points) for analytics
+3. **Driver feedback** -- Siren (`/siren.mp3`) plays, the alert banner flashes, and a spoken message is generated via the Web Speech API.
+4. **Cooldowns** -- 5 s per-sign alert cooldown and 10 s violation cooldown prevent spam.
 
 ### Live Monitoring via WebRTC
 
@@ -435,6 +427,7 @@ final_score = max(0, 100 - total_penalty_points)
 
 | Event Type | Penalty Points |
 |------------|---------------|
+| Stop Sign Violation (ran at speed) | 25 |
 | Drowsiness | 20 |
 | Phone Usage | 15 |
 | Distracted | 15 |
@@ -443,8 +436,7 @@ final_score = max(0, 100 - total_penalty_points)
 | Harsh Braking | 5 |
 | Yawning | 5 |
 | Sudden Acceleration | 5 |
-| Stop Sign Ahead (`stop_sign_detected`) | 0 (informational) |
-| Stop Sign Violation (`stop_sign_violation`) | 25 |
+| Stop Sign Detected (informational) | 0 |
 
 **Risk levels based on score:**
 
@@ -569,8 +561,7 @@ Generate weekly or monthly analytics reports containing:
 |--------|----------|------|-------------|
 | POST | `/api/webhook/violation` | API Key (`X-API-Key` header) | Ingest violation from camera system |
 
-**Webhook payload:** `event_type` may be any registered violation type (including `stop_sign_detected` and `stop_sign_violation` from the Driver Camera stop-sign pipeline).
-
+**Webhook payload:**
 ```json
 {
   "driver_id": 1,
@@ -800,9 +791,32 @@ A transparent canvas overlays the video feed and draws:
 
 Violations trigger a multi-sensory alert:
 
-- **Audio** -- Web Audio API generates oscillating tones (sawtooth wave for high severity, sine wave for low/medium)
+- **Audio** -- Web Audio API generates oscillating tones (sawtooth wave for high severity, sine wave for low/medium). Stop sign detections additionally play `frontend/public/siren.mp3`
+- **Voice** -- Web Speech API (`speechSynthesis`) announces the violation type
 - **Visual** -- Red flash overlay pulses 3 times over 1.5 seconds
 - **Haptic** -- Device vibration pattern `[200ms, 100ms, 200ms, 100ms, 200ms]` (if supported)
+
+---
+
+## Stop Sign Object Detection
+
+### Model
+
+**COCO-SSD (MobileNet v2)** via `@tensorflow-models/coco-ssd` on top of `@tensorflow/tfjs-backend-webgl`. Detects 80 COCO classes; this project uses the `stop sign` and `traffic light` classes only.
+
+### Detection Loop
+
+| Setting | Value |
+|---------|-------|
+| Polling interval | 250 ms |
+| Base confidence threshold | 0.28 |
+| Zoom-retry threshold (center 2x crop) | 0.22 |
+| Consecutive-frame confirmation | 2 frames |
+| Max detections per frame | 12 |
+
+### Fusion Engine
+
+`useStopSignFusion` maps `(distance, speed)` -> `{NONE, INFO, WARNING, URGENT, VIOLATION}` priority. Camera detections are cross-checked against nearby OSM signs (within 50 m) before promoting to an alert. See the "Stop Sign Detection" feature section above for the full decision table.
 
 ---
 
@@ -829,10 +843,9 @@ All API calls go through an Axios instance (`/api` base URL) configured with:
 | `useWebRTCPublisher` | Manage WebRTC publishing (driver -> manager streaming) |
 | `useWebRTCViewer` | Manage WebRTC viewing (manager receives stream) |
 | `useMediaRecorderBuffer` | Rolling 20s video buffer + snapshot/clip capture |
-| `useViolationAlerts` | Audio siren + visual flash + haptic + Web Speech voice alerts |
-| `useStopSignCamera` | COCO-SSD stop / traffic-light detection on the driver video element |
-| `useStopSignFusion` | GPS + OSM + camera fusion, cooldowns, violation callbacks |
-| `useRealtimeUpdates` | Live dashboard / violation updates where wired |
+| `useViolationAlerts` | Audio siren + voice announcement + visual flash + haptic vibration on violations |
+| `useStopSignCamera` | Loads COCO-SSD, runs the 250 ms detection loop on the video element |
+| `useStopSignFusion` | Fuses camera detection + GPS + OSM signs into prioritized alerts and violations |
 | `usePermission` | Role-based feature flags (canEditDrivers, canGenerateReports, etc.) |
 
 ### Key Constants
@@ -840,7 +853,7 @@ All API calls go through an Axios instance (`/api` base URL) configured with:
 ```javascript
 DEMO_WEBCAM_KEY   // API key for the demo webcam camera
 ICE_SERVERS       // WebRTC STUN server configuration
-EVENT_TYPES       // Violation types (incl. stop_sign_detected, stop_sign_violation)
+EVENT_TYPES       // 8 violation types with labels, colors, penalty points
 RISK_LEVELS       // 4 risk levels with color codes and score thresholds
 SEVERITY_COLORS   // Color mapping for low/medium/high/critical
 CAMERA_TYPES      // dashcam, cabin, external, webcam
@@ -870,3 +883,9 @@ ROLES             // ADMIN, MANAGER, VIEWER, DRIVER
 | `/api/ws` | `ws://127.0.0.1:8000` | WebSocket signaling |
 | `/api` | `http://127.0.0.1:8000` | REST API |
 | `/uploads` | `http://127.0.0.1:8000` | Static file serving |
+
+---
+
+## Internal Developer Guide
+
+Deeper implementation notes -- module-by-module walkthroughs, the detection pipelines, extension playbooks (adding a new violation type, a new detector, a new role), gotchas, and troubleshooting -- live in [`DEVELOPER_GUIDE.md`](./DEVELOPER_GUIDE.md). Keep that file updated alongside code changes so new teammates can onboard without pulling the full repo into their head first.

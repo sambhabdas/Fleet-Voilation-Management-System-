@@ -1,18 +1,21 @@
 /**
  * Stop Sign Camera Detection Hook
- * Uses TensorFlow.js and COCO-SSD model for real-time stop sign detection
+ * Uses COCO-SSD for real-time stop sign detection
  */
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import * as cocoSsd from '@tensorflow-models/coco-ssd'
 import * as tf from '@tensorflow/tfjs'
 import '@tensorflow/tfjs-backend-webgl'
 
-// Detection configuration (see DriverCamera / fusion — ~300ms loop, multi-frame confirm)
+// Detection configuration (see DriverCamera / fusion — ~250ms loop, multi-frame confirm)
 const CONFIG = {
-  DETECTION_INTERVAL: 300,
-  CONFIDENCE_THRESHOLD: 0.55,
+  DETECTION_INTERVAL: 250,
+  CONFIDENCE_THRESHOLD: 0.28,
+  ZOOM_CONFIDENCE_THRESHOLD: 0.22,
   CONSECUTIVE_DETECTIONS: 2,
+  MAX_DETECTIONS: 12,
+  ZOOM_FACTOR: 2,
 }
 
 /**
@@ -30,29 +33,42 @@ export default function useStopSignCamera(videoRef, onDetect, onLost, bboxOverla
   const consecutiveDetectionsRef = useRef(0)
   const lastDetectionRef = useRef(null)
   const isModelLoadingRef = useRef(false)
+  const zoomCanvasRef = useRef(null)
+  const [isModelReady, setIsModelReady] = useState(false)
+  const [isModelLoading, setIsModelLoading] = useState(false)
 
-  // Load COCO-SSD model
+  const detectFrameRunningRef = useRef(false)
+
+  // Load COCO-SSD model.
   const loadModel = useCallback(async () => {
     if (modelRef.current || isModelLoadingRef.current) return
 
     isModelLoadingRef.current = true
+    setIsModelLoading(true)
+
     try {
       console.log('[StopSignCamera] Loading COCO-SSD model...')
       await tf.setBackend('webgl')
       await tf.ready()
-      modelRef.current = await cocoSsd.load({
-        base: 'mobilenet_v2',
-      })
-      console.log('[StopSignCamera] Model loaded successfully')
+
+      const loadedModel = await cocoSsd.load({ base: 'mobilenet_v2' })
+      modelRef.current = loadedModel
+      setIsModelReady(true)
+      console.log('[StopSignCamera] COCO-SSD model ready')
     } catch (error) {
       console.error('[StopSignCamera] Failed to load model:', error)
     } finally {
       isModelLoadingRef.current = false
+      setIsModelLoading(false)
     }
   }, [])
 
   // Detect stop signs in video frame
   const detectFrame = useCallback(async () => {
+    if (detectFrameRunningRef.current) {
+      return
+    }
+
     if (!modelRef.current) {
       console.log('[StopSignCamera] detectFrame: model not ready')
       return
@@ -73,50 +89,81 @@ export default function useStopSignCamera(videoRef, onDetect, onLost, bboxOverla
     }
 
     try {
-      const predictions = await modelRef.current.detect(videoRef.current)
+      detectFrameRunningRef.current = true
 
-      // Log all predictions for debugging
-      if (predictions.length > 0) {
-        console.log('[StopSignCamera] Predictions:', predictions.map(p => `${p.class}(${(p.score * 100).toFixed(1)}%)`).join(', '))
+      const detectStopSign = async (input, threshold) => {
+        const detections = await modelRef.current.detect(input, CONFIG.MAX_DETECTIONS, threshold)
+        return detections
+          .filter((d) => d.class === 'stop sign' && d.score >= threshold)
+          .sort((a, b) => b.score - a.score)[0] || null
       }
 
-      // Find stop sign predictions (COCO-SSD class: "stop sign" or "traffic light")
-      const stopSign = predictions.find(
-        (p) =>
-          (p.class === 'stop sign' || p.class === 'traffic light') &&
-          p.score > CONFIG.CONFIDENCE_THRESHOLD
-      )
+      let stopSign = await detectStopSign(videoRef.current, CONFIG.CONFIDENCE_THRESHOLD)
+      let mappedBbox = null
 
-      if (stopSign) {
-        if (bboxOverlayRef) {
-          bboxOverlayRef.current = {
-            bbox: stopSign.bbox,
-            label: stopSign.class === 'stop sign' ? 'STOP SIGN' : 'TRAFFIC LIGHT',
+      if (!stopSign) {
+        const videoEl = videoRef.current
+        const frameW = videoEl.videoWidth
+        const frameH = videoEl.videoHeight
+
+        if (frameW > 0 && frameH > 0) {
+          if (!zoomCanvasRef.current) {
+            zoomCanvasRef.current = document.createElement('canvas')
+          }
+
+          const zoomCanvas = zoomCanvasRef.current
+          zoomCanvas.width = frameW
+          zoomCanvas.height = frameH
+
+          const cropW = frameW / CONFIG.ZOOM_FACTOR
+          const cropH = frameH / CONFIG.ZOOM_FACTOR
+          const sx = (frameW - cropW) / 2
+          const sy = (frameH - cropH) / 2
+
+          const ctx = zoomCanvas.getContext('2d')
+          if (!ctx) {
+            return
+          }
+          ctx.drawImage(videoEl, sx, sy, cropW, cropH, 0, 0, frameW, frameH)
+
+          const zoomHit = await detectStopSign(zoomCanvas, CONFIG.ZOOM_CONFIDENCE_THRESHOLD)
+          if (zoomHit) {
+            const [zx, zy, zw, zh] = zoomHit.bbox
+            mappedBbox = [
+              sx + (zx / frameW) * cropW,
+              sy + (zy / frameH) * cropH,
+              (zw / frameW) * cropW,
+              (zh / frameH) * cropH,
+            ]
+            stopSign = { ...zoomHit, bbox: mappedBbox }
           }
         }
-        console.log('[StopSignCamera] Stop sign found!', stopSign.class, 'confidence:', (stopSign.score * 100).toFixed(1) + '%')
+      }
+
+      if (stopSign) {
+        const [x, y, width, height] = mappedBbox || stopSign.bbox
+        if (bboxOverlayRef) {
+          bboxOverlayRef.current = {
+            bbox: [x, y, width, height],
+            label: 'STOP SIGN',
+          }
+        }
+
+        console.log('[StopSignCamera] Stop sign found! confidence:', `${(stopSign.score * 100).toFixed(1)}%`)
         consecutiveDetectionsRef.current++
-        console.log('[StopSignCamera] Consecutive detections:', consecutiveDetectionsRef.current, '/', CONFIG.CONSECUTIVE_DETECTIONS)
 
         // Only trigger after consecutive detections to reduce false positives
         if (consecutiveDetectionsRef.current >= CONFIG.CONSECUTIVE_DETECTIONS) {
           const detectionInfo = {
-            type: stopSign.class === 'stop sign' ? 'STOP_SIGN' : 'TRAFFIC_LIGHT',
+            type: 'STOP_SIGN',
             confidence: stopSign.score,
-            bbox: stopSign.bbox, // [x, y, width, height]
+            bbox: [x, y, width, height], // [x, y, width, height]
             timestamp: Date.now(),
           }
 
-          // Only call onDetect if this is a new detection or significantly different
-          if (
-            !lastDetectionRef.current ||
-            lastDetectionRef.current.type !== detectionInfo.type ||
-            Math.abs(lastDetectionRef.current.confidence - detectionInfo.confidence) > 0.2
-          ) {
-            console.log('[StopSignCamera] Triggering onDetect callback!', detectionInfo)
-            lastDetectionRef.current = detectionInfo
-            onDetect?.(detectionInfo)
-          }
+          // Emit at detection cadence once confirmed; fusion layer handles cooldown.
+          lastDetectionRef.current = detectionInfo
+          onDetect?.(detectionInfo)
         }
       } else {
         if (bboxOverlayRef) {
@@ -132,6 +179,8 @@ export default function useStopSignCamera(videoRef, onDetect, onLost, bboxOverla
       }
     } catch (error) {
       console.error('[StopSignCamera] Detection error:', error)
+    } finally {
+      detectFrameRunningRef.current = false
     }
   }, [videoRef, onDetect, onLost, bboxOverlayRef])
 
@@ -192,9 +241,6 @@ export default function useStopSignCamera(videoRef, onDetect, onLost, bboxOverla
       detectionIntervalRef.current = null
     }
   }, [])
-
-  const isModelReady = !!modelRef.current
-  const isModelLoading = isModelLoadingRef.current
 
   return {
     isModelReady,

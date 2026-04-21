@@ -12,6 +12,7 @@ import CameraList from '@/pages/cameras/CameraList'
 import DriverCamera from '@/pages/cameras/DriverCamera'
 import ManagerMonitoring from '@/pages/monitoring/ManagerMonitoring'
 import Reports from '@/pages/reports/Reports'
+import StopSignSimulation from '@/pages/dev/StopSignSimulation'
 import { ROLES } from '@/constants'
 
 export const router = createBrowserRouter([
@@ -100,6 +101,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.MANAGER]}>
             <Reports />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: '/dev/stop-sign-simulation',
+        element: (
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.MANAGER, ROLES.VIEWER, ROLES.DRIVER]}>
+            <StopSignSimulation />
           </ProtectedRoute>
         ),
       },

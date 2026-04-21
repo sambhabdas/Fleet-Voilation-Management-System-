@@ -35,7 +35,7 @@ const signsCache = {
   timestamp: 0,
   location: null,
   CACHE_DURATION: 5 * 60 * 1000, // 5 minutes
-  CACHE_RADIUS: 5000, // 5km - reuse cache if within this radius
+  CACHE_RADIUS: 10000, // 10km - reuse cache if within this radius
 }
 
 /**
@@ -87,7 +87,7 @@ function parseOverpassResponse(data, signType) {
  * @param {number} radius - Search radius in meters (default: 2000)
  * @returns {Promise<Array>} Array of traffic signs
  */
-export async function fetchTrafficSigns(lat, lng, radius = 2000) {
+export async function fetchTrafficSigns(lat, lng, radius = 5000) {
   // Check cache first
   if (isCacheValid() && isWithinCachedArea(lat, lng)) {
     console.log('[OSM] Using cached signs')

@@ -18,8 +18,8 @@ const CONFIG = {
   HIGH_SPEED_THRESHOLD: 30, // Above this at close range = violation
 
   // Cooldowns (ms)
-  ALERT_COOLDOWN: 8000, // Time between same-sign alerts
-  VIOLATION_COOLDOWN: 15000, // Time between violation records
+  ALERT_COOLDOWN: 5000, // Time between same-sign alerts
+  VIOLATION_COOLDOWN: 10000, // Time between violation records
 
   // Camera detection weight
   CAMERA_DETECTION_RADIUS: 50, // Only trust camera if OSM sign is within this range

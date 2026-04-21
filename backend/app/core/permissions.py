@@ -11,7 +11,7 @@ def require_roles(*allowed_roles):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",
             )
-        return current_user
+        return current_user   
     return dependency
 
 
