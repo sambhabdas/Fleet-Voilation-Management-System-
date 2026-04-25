@@ -53,7 +53,7 @@ export const CAMERA_TYPES = {
   webcam: { label: 'Webcam', color: '#52c41a' },
 }
 
-export const DEMO_WEBCAM_KEY = 'demo-webcam-api-key-for-testing-1234567890abcdef0123456789abcdef'
+export const DEMO_WEBCAM_KEY = import.meta.env.VITE_DEMO_WEBCAM_KEY || ''
 
 export const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 
@@ -72,13 +72,13 @@ export const REVIEW_STATUSES = {
 
 // Firebase configuration — replace with your actual Firebase project values
 export const FIREBASE_CONFIG = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
 }
 
 // VAPID key for FCM web push — get from Firebase Console > Project Settings > Cloud Messaging
-export const FIREBASE_VAPID_KEY = ''
+export const FIREBASE_VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY || ''

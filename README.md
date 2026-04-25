@@ -1,3 +1,27 @@
+## Production Deployment: Render (Backend) & Vercel (Frontend)
+
+### Backend (Render)
+1. Create a new Web Service on Render and connect your repo.
+2. Set environment variables in the Render dashboard (see `backend/.env.example`).
+  - Use a managed PostgreSQL database (update `DATABASE_URL`).
+  - Set `CORS_ORIGINS` to your Vercel frontend URL (e.g., `https://your-frontend.vercel.app`).
+3. Set the start command to:
+  ```
+  uvicorn app.main:app --host 0.0.0.0 --port 8000
+  ```
+4. (Optional) Configure persistent storage or use cloud storage for uploads.
+
+### Frontend (Vercel)
+1. Import your frontend repo into Vercel.
+2. In Vercel dashboard, set the environment variable:
+  - `VITE_API_BASE_URL=https://your-backend.onrender.com/api`
+3. Deploy. Vercel will build and host your React app.
+
+### Notes
+- All API calls from the frontend will use the backend URL set in `VITE_API_BASE_URL`.
+- Backend CORS must allow the exact Vercel frontend domain.
+- Never commit real secrets to git. Use `.env.example` as a template only.
+- For file uploads, consider using S3 or similar in production.
 # Fleet Violation Monitoring System
 
 AI-powered fleet safety monitoring and violation tracking system with real-time browser-based face detection, live WebRTC video streaming, automated evidence capture, and role-based dashboards.
@@ -866,7 +890,17 @@ ROLES             // ADMIN, MANAGER, VIEWER, DRIVER
 
 ## Configuration
 
+
 ### Backend Environment Variables
+
+Copy `.env.example` to `.env` and set values for deployment:
+
+```
+cp backend/.env.example backend/.env
+# Edit backend/.env for production
+```
+
+**Important:** Set `CORS_ORIGINS` to your deployed frontend URL (e.g., `https://your-frontend-domain.com`).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
