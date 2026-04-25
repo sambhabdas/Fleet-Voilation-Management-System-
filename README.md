@@ -21,7 +21,10 @@
 - All API calls from the frontend will use the backend URL set in `VITE_API_BASE_URL`.
 - Backend CORS must allow the exact Vercel frontend domain.
 - Never commit real secrets to git. Use `.env.example` as a template only.
-- For file uploads, consider using S3 or similar in production.
+- **Uploads Directory:**
+  - On Vercel/static hosts, uploads are stored in `/tmp/uploads` (ephemeral, resets on redeploy).
+  - For persistent uploads, use S3 or similar in production and update backend logic.
+  - See [DEPLOYMENT.md](./DEPLOYMENT.md) for details on configuring `UPLOADS_DIR`.
 # Fleet Violation Monitoring System
 
 AI-powered fleet safety monitoring and violation tracking system with real-time browser-based face detection, live WebRTC video streaming, automated evidence capture, and role-based dashboards.
