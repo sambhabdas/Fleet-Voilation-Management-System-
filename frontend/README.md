@@ -1,3 +1,12 @@
+# Environment Variables
+
+For deployment, set the backend API base URL in a `.env` file:
+
+```
+VITE_API_BASE_URL=https://your-backend-domain.com/api
+```
+
+This is used by the frontend to connect to the backend API. For local development, the Vite proxy will handle `/api` requests automatically.
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
